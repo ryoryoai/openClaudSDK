@@ -1,0 +1,40 @@
+agent:
+  model: "claude-sonnet-4-6"
+  permission_mode: "acceptEdits"
+  max_turns: 25
+  max_budget_usd: 1.0
+  cwd: "."
+  allowed_tools:
+    - Read
+    - Write
+    - Edit
+    - Bash
+    - Glob
+    - Grep
+    - WebSearch
+    - WebFetch
+
+safety:
+  blocked_commands:
+    - 'rm\s+-rf\s+/'
+    - 'sudo\s+'
+    - 'curl.*\|\s*sh'
+    - ':\(\)\{.*\}'
+    - 'mkfs\.'
+    - 'dd\s+if='
+  blocked_paths:
+    - /etc
+    - /usr
+    - /System
+    - /var
+
+discord:
+  allowed_channel_ids: []  # empty = all channels
+  thread_mode: true
+
+memory:
+  data_dir: "./data"
+
+session:
+  idle_timeout_minutes: 30
+  max_sessions_per_user: 3
