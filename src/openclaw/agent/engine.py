@@ -110,7 +110,7 @@ class AgentEngine:
                 raw_messages.append(message)
 
                 if isinstance(message, SystemMessage) and message.subtype == "init":
-                    captured_session_id = message.session_id
+                    captured_session_id = message.data.get("session_id")
 
                 elif isinstance(message, AssistantMessage):
                     for block in message.content:

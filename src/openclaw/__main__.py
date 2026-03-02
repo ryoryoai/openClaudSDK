@@ -14,6 +14,9 @@ from openclaw.discord_adapter.bot import create_bot
 
 
 def main() -> None:
+    # Allow running inside a Claude Code session (unset nesting guard)
+    os.environ.pop("CLAUDECODE", None)
+
     # Load .env
     load_dotenv()
 
