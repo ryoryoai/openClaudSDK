@@ -39,9 +39,15 @@ class AgentEngine:
         self,
         agent_config: AgentConfig,
         safety_config: SafetyConfig,
+        *,
+        safety_handler: SafetyHandler | None = None,
+        skill_tools: list[Any] | None = None,
+        skill_hooks: dict[str, list[Any]] | None = None,
     ) -> None:
         self._agent_config = agent_config
-        self._safety = SafetyHandler(safety_config)
+        self._safety = safety_handler or SafetyHandler(safety_config)
+        self._skill_tools = skill_tools or []
+        self._skill_hooks = skill_hooks or {}
 
     def _build_options(
         self,
@@ -51,21 +57,30 @@ class AgentEngine:
         cwd: str | None = None,
     ) -> ClaudeAgentOptions:
         """Build ClaudeAgentOptions from config, optionally resuming a session."""
+        # Build hooks: start with safety hooks, then merge skill hooks
+        hooks: dict[str, list[Any]] = {
+            "PreToolUse": [
+                HookMatcher(
+                    matcher="Bash|Read|Write|Edit",
+                    hooks=[self._safety.pre_tool_use_hook],
+                ),
+            ],
+        }
+        for hook_name, matchers in self._skill_hooks.items():
+            hooks.setdefault(hook_name, []).extend(matchers)
+
         kwargs: dict[str, Any] = {
             "model": self._agent_config.model,
             "permission_mode": self._agent_config.permission_mode,
             "max_turns": self._agent_config.max_turns,
             "max_budget_usd": self._agent_config.max_budget_usd,
             "allowed_tools": list(self._agent_config.allowed_tools),
-            "hooks": {
-                "PreToolUse": [
-                    HookMatcher(
-                        matcher="Bash|Read|Write|Edit",
-                        hooks=[self._safety.pre_tool_use_hook],
-                    ),
-                ],
-            },
+            "hooks": hooks,
         }
+
+        # Add skill-provided MCP servers
+        if self._skill_tools:
+            kwargs.setdefault("mcp_servers", []).extend(self._skill_tools)
 
         if cwd:
             kwargs["cwd"] = cwd

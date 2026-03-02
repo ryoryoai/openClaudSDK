@@ -5,10 +5,15 @@ description = "Discord AI Agent powered by Claude Agent SDK"
 requires-python = ">=3.10"
 dependencies = [
     "claude-agent-sdk>=0.1.44",
-    "discord.py>=2.6.0",
+    "discord.py[voice]>=2.6.0",
     "pyyaml>=6.0",
     "python-dotenv>=1.0.0",
 ]
+
+[project.optional-dependencies]
+vector = ["chromadb>=0.6.0"]
+voice = ["openai>=1.0.0"]
+all = ["chromadb>=0.6.0", "openai>=1.0.0"]
 
 [project.scripts]
 openclaw = "openclaw.__main__:main"

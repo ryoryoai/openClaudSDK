@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from openclaw.agent.engine import AgentEngine, AgentResponse
+from openclaw.agent.health import HealthMonitor
 from openclaw.config import AppConfig
 
 logger = logging.getLogger(__name__)
@@ -33,9 +34,15 @@ def _session_key(user_id: int, channel_id: int) -> str:
 class SessionManager:
     """Manage per-user-per-channel sessions with persistence and idle cleanup."""
 
-    def __init__(self, config: AppConfig, engine: AgentEngine) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        engine: AgentEngine,
+        health_monitor: HealthMonitor | None = None,
+    ) -> None:
         self._config = config
         self._engine = engine
+        self._health_monitor = health_monitor
         self._sessions: dict[str, Session] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._sessions_dir = Path(config.memory.data_dir) / "sessions"
@@ -58,11 +65,30 @@ class SessionManager:
 
         async with lock:
             session = self._get_or_create(key)
-            response = await self._engine.send_and_collect(
-                prompt,
-                session_id=session.session_id,
-                system_prompt=system_prompt,
-            )
+
+            start_time = time.time()
+            error_message = ""
+            success = True
+
+            try:
+                response = await self._engine.send_and_collect(
+                    prompt,
+                    session_id=session.session_id,
+                    system_prompt=system_prompt,
+                )
+            except Exception as exc:
+                success = False
+                error_message = str(exc)
+                raise
+            finally:
+                if self._health_monitor is not None:
+                    duration_ms = (time.time() - start_time) * 1000
+                    self._health_monitor.record(
+                        user_id=user_id,
+                        duration_ms=duration_ms,
+                        success=success,
+                        error_message=error_message,
+                    )
 
             # Update session state
             if response.session_id:

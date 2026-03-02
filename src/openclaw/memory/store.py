@@ -6,7 +6,10 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from openclaw.memory.vector_store import VectorMemoryStore
 
 logger = logging.getLogger(__name__)
 
@@ -17,9 +20,14 @@ class MemoryStore:
     Each user gets a separate JSON file under ``data_dir/memory/``.
     """
 
-    def __init__(self, data_dir: str | Path) -> None:
+    def __init__(
+        self,
+        data_dir: str | Path,
+        vector_store: VectorMemoryStore | None = None,
+    ) -> None:
         self._dir = Path(data_dir) / "memory"
         self._dir.mkdir(parents=True, exist_ok=True)
+        self._vector_store = vector_store
 
     def _user_path(self, user_id: int) -> Path:
         return self._dir / f"user_{user_id}.json"
@@ -51,6 +59,11 @@ class MemoryStore:
         data = self._load(user_id)
         data[key] = {"value": value, "updated_at": time.time()}
         self._save(user_id, data)
+        if self._vector_store is not None:
+            try:
+                self._vector_store.add(user_id, key, value)
+            except Exception:
+                logger.warning("Failed to sync to vector store: %s", key)
 
     def delete(self, user_id: int, key: str) -> bool:
         """Delete a memory entry. Returns True if it existed."""
@@ -59,6 +72,11 @@ class MemoryStore:
             return False
         del data[key]
         self._save(user_id, data)
+        if self._vector_store is not None:
+            try:
+                self._vector_store.remove(user_id, key)
+            except Exception:
+                logger.warning("Failed to remove from vector store: %s", key)
         return True
 
     def list_keys(self, user_id: int) -> list[str]:

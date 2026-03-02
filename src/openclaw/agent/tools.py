@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
 from openclaw.memory.store import MemoryStore
 
+if TYPE_CHECKING:
+    from openclaw.memory.vector_store import VectorMemoryStore
 
-def build_memory_tools(store: MemoryStore):
+
+def build_memory_tools(
+    store: MemoryStore,
+    vector_store: VectorMemoryStore | None = None,
+):
     """Create MCP tools for reading and writing agent memory.
 
     The tools receive a ``_user_id`` parameter injected by the engine
@@ -64,7 +72,37 @@ def build_memory_tools(store: MemoryStore):
             "content": [{"type": "text", "text": f"Stored keys:\n{formatted}"}]
         }
 
+    tools_list = [memory_read, memory_write, memory_list]
+
+    if vector_store is not None:
+
+        @tool(
+            "memory_search",
+            "Search the user's memories by semantic similarity. Returns the most relevant stored memories.",
+            {"query": str, "_user_id": int},
+        )
+        async def memory_search(args: dict) -> dict:
+            query = args["query"]
+            user_id = args.get("_user_id", 0)
+            results = vector_store.search(user_id, query)
+            if not results:
+                return {
+                    "content": [
+                        {"type": "text", "text": "No matching memories found."}
+                    ]
+                }
+            lines = []
+            for r in results:
+                lines.append(f"- **{r['key']}**: {r['value']} (distance: {r['distance']})")
+            return {
+                "content": [
+                    {"type": "text", "text": "Matching memories:\n" + "\n".join(lines)}
+                ]
+            }
+
+        tools_list.append(memory_search)
+
     return create_sdk_mcp_server(
         "memory-tools",
-        tools=[memory_read, memory_write, memory_list],
+        tools=tools_list,
     )

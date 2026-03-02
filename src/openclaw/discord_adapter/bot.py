@@ -23,19 +23,135 @@ class OpenClawBot(discord.Client):
         intents = discord.Intents.default()
         intents.message_content = True
         intents.messages = True
+
+        # Enable voice intents if voice is enabled
+        if config.voice.enabled:
+            intents.voice_states = True
+
         super().__init__(intents=intents)
 
         self._config = config
         self.tree = app_commands.CommandTree(self)
 
-        # Agent layer
-        self._engine = AgentEngine(config.agent, config.safety)
-        self._session_manager = SessionManager(config, self._engine)
+        # --- Optional subsystems ---
+
+        # Audit logger
+        self._audit_logger = None
+        if config.audit.enabled:
+            from openclaw.agent.audit import AuditLogger
+
+            self._audit_logger = AuditLogger(config.audit.log_dir)
+            logger.info("Audit logging enabled: %s", config.audit.log_dir)
+
+        # Safety handler (with optional audit)
+        from openclaw.agent.safety import SafetyHandler
+
+        safety_handler = SafetyHandler(
+            config.safety, audit_logger=self._audit_logger
+        )
+
+        # Skill loader
+        self._skill_loader = None
+        skill_tools: list = []
+        skill_hooks: dict = {}
+        if config.skills.enabled:
+            from openclaw.skills.loader import SkillLoader
+
+            self._skill_loader = SkillLoader(
+                config.skills.skills_dir,
+                disabled_skills=config.skills.disabled_skills,
+            )
+            self._skill_loader.load_all()
+            skill_tools = self._skill_loader.get_tools()
+            skill_hooks = self._skill_loader.get_hooks()
+            logger.info("Skills system enabled: %s", config.skills.skills_dir)
+
+        # Agent engine (with safety + skills)
+        self._engine = AgentEngine(
+            config.agent,
+            config.safety,
+            safety_handler=safety_handler,
+            skill_tools=skill_tools or None,
+            skill_hooks=skill_hooks or None,
+        )
+
+        # Health monitor
+        self._health_monitor = None
+        if config.health.enabled:
+            from openclaw.agent.health import HealthMonitor
+
+            self._health_monitor = HealthMonitor()
+            logger.info("Health monitoring enabled")
+
+        # Session manager (with optional health monitor)
+        self._session_manager = SessionManager(
+            config, self._engine, health_monitor=self._health_monitor
+        )
+
+        # Access controller
+        self._access_controller = None
+        if config.access_control.enabled:
+            from openclaw.agent.access_control import (
+                AccessController,
+                PermissionLevel,
+            )
+
+            self._access_controller = AccessController(
+                data_file=config.access_control.data_file,
+                admin_user_ids=config.access_control.admin_user_ids,
+                default_permission=PermissionLevel(
+                    config.access_control.default_permission
+                ),
+            )
+            logger.info("Access control enabled")
+
+        # Vector memory store
+        self._vector_store = None
+        if config.memory.vector_enabled:
+            try:
+                from openclaw.memory.vector_store import VectorMemoryStore
+
+                self._vector_store = VectorMemoryStore(
+                    data_dir=config.memory.data_dir,
+                    collection_name=config.memory.vector_collection_name,
+                )
+                logger.info("Vector memory enabled")
+            except ImportError:
+                logger.warning(
+                    "chromadb not installed — vector memory disabled"
+                )
+
+        # Voice handler
+        self._voice_handler = None
+        if config.voice.enabled:
+            try:
+                from openclaw.voice.handler import VoiceHandler
+
+                self._voice_handler = VoiceHandler(
+                    session_manager=self._session_manager,
+                    stt_model=config.voice.stt_model,
+                    tts_model=config.voice.tts_model,
+                    tts_voice=config.voice.tts_voice,
+                    silence_timeout=config.voice.silence_timeout_seconds,
+                )
+                logger.info("Voice support enabled")
+            except ImportError:
+                logger.warning(
+                    "openai or discord.py[voice] not installed — voice disabled"
+                )
+
         self._handler: MessageHandler | None = None
 
     async def setup_hook(self) -> None:
         """Called once when the bot connects — register commands and start cleanup."""
-        register_commands(self.tree, self._session_manager)
+        register_commands(
+            self.tree,
+            self._session_manager,
+            audit_logger=self._audit_logger,
+            health_monitor=self._health_monitor,
+            access_controller=self._access_controller,
+            voice_handler=self._voice_handler,
+        )
         await self.tree.sync()
         logger.info("Slash commands synced")
 
@@ -50,6 +166,7 @@ class OpenClawBot(discord.Client):
             self._config,
             self._session_manager,
             bot_user_id=self.user.id,
+            access_controller=self._access_controller,
         )
 
     async def on_message(self, message: discord.Message) -> None:
@@ -60,6 +177,8 @@ class OpenClawBot(discord.Client):
         await self._handler.handle(message)
 
     async def close(self) -> None:
+        if self._skill_loader is not None:
+            self._skill_loader.unload_all()
         await self._session_manager.close()
         await super().close()
 

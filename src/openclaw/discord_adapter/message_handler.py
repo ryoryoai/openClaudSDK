@@ -11,6 +11,7 @@ import discord
 from openclaw.discord_adapter.formatter import split_message
 
 if TYPE_CHECKING:
+    from openclaw.agent.access_control import AccessController
     from openclaw.agent.session import SessionManager
     from openclaw.config import AppConfig
 
@@ -25,10 +26,12 @@ class MessageHandler:
         config: AppConfig,
         session_manager: SessionManager,
         bot_user_id: int,
+        access_controller: AccessController | None = None,
     ) -> None:
         self._config = config
         self._sessions = session_manager
         self._bot_user_id = bot_user_id
+        self._access_controller = access_controller
         self._processing: set[str] = set()  # prevent concurrent per-user+channel
 
     def should_handle(self, message: discord.Message) -> bool:
@@ -66,6 +69,21 @@ class MessageHandler:
             self._processing.discard(key)
 
     async def _process(self, message: discord.Message) -> None:
+        # Access control check
+        if self._access_controller is not None:
+            from openclaw.agent.access_control import PermissionLevel
+
+            perm = self._access_controller.get_permission(message.author.id)
+            if perm == PermissionLevel.BLOCKED:
+                await message.reply("You do not have access to this bot.")
+                return
+            if perm < PermissionLevel.APPROVED:
+                code = self._access_controller.generate_code(message.author.id)
+                await message.reply(
+                    f"Access pending approval. Use `/approve {code}` to verify."
+                )
+                return
+
         # Strip the bot mention from the prompt
         prompt = message.content
         for mention in message.mentions:

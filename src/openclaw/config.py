@@ -66,6 +66,47 @@ class DiscordConfig:
 @dataclass
 class MemoryConfig:
     data_dir: str = "./data"
+    vector_enabled: bool = False
+    vector_collection_name: str = "openclaw_memory"
+    vector_search_results: int = 5
+
+
+@dataclass
+class AuditConfig:
+    enabled: bool = False
+    log_dir: str = "data/audit"
+    max_entries_display: int = 20
+
+
+@dataclass
+class HealthConfig:
+    enabled: bool = False
+    webhook_url: str | None = None
+    error_rate_threshold: float = 0.1
+
+
+@dataclass
+class AccessControlConfig:
+    enabled: bool = False
+    admin_user_ids: list[int] = field(default_factory=list)
+    default_permission: int = 1  # PermissionLevel.PENDING
+    data_file: str = "data/access_control.json"
+
+
+@dataclass
+class SkillsConfig:
+    enabled: bool = False
+    skills_dir: str = "skills"
+    disabled_skills: list[str] = field(default_factory=list)
+
+
+@dataclass
+class VoiceConfig:
+    enabled: bool = False
+    stt_model: str = "whisper-1"
+    tts_model: str = "tts-1"
+    tts_voice: str = "alloy"
+    silence_timeout_seconds: float = 1.5
 
 
 @dataclass
@@ -81,6 +122,11 @@ class AppConfig:
     discord: DiscordConfig = field(default_factory=DiscordConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     session: SessionConfig = field(default_factory=SessionConfig)
+    audit: AuditConfig = field(default_factory=AuditConfig)
+    health: HealthConfig = field(default_factory=HealthConfig)
+    access_control: AccessControlConfig = field(default_factory=AccessControlConfig)
+    skills: SkillsConfig = field(default_factory=SkillsConfig)
+    voice: VoiceConfig = field(default_factory=VoiceConfig)
 
 
 def load_config(path: str | Path = "config.yaml") -> AppConfig:
@@ -128,6 +174,41 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         cfg.session = SessionConfig(**{
             k: v for k, v in raw["session"].items()
             if k in SessionConfig.__dataclass_fields__
+        })
+
+    if "audit" in raw:
+        cfg.audit = AuditConfig(**{
+            k: v for k, v in raw["audit"].items()
+            if k in AuditConfig.__dataclass_fields__
+        })
+
+    if "health" in raw:
+        cfg.health = HealthConfig(**{
+            k: v for k, v in raw["health"].items()
+            if k in HealthConfig.__dataclass_fields__
+        })
+
+    if "access_control" in raw:
+        ac = raw["access_control"]
+        cfg.access_control = AccessControlConfig(
+            enabled=ac.get("enabled", False),
+            admin_user_ids=[
+                int(uid) for uid in ac.get("admin_user_ids", []) if uid
+            ],
+            default_permission=ac.get("default_permission", 1),
+            data_file=ac.get("data_file", "data/access_control.json"),
+        )
+
+    if "skills" in raw:
+        cfg.skills = SkillsConfig(**{
+            k: v for k, v in raw["skills"].items()
+            if k in SkillsConfig.__dataclass_fields__
+        })
+
+    if "voice" in raw:
+        cfg.voice = VoiceConfig(**{
+            k: v for k, v in raw["voice"].items()
+            if k in VoiceConfig.__dataclass_fields__
         })
 
     return cfg
