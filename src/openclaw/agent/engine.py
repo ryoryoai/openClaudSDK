@@ -7,13 +7,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from claude_agent_sdk import (
-    AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKClient,
     HookMatcher,
     ResultMessage,
     SystemMessage,
-    TextBlock,
 )
 
 from openclaw.agent.safety import SafetyHandler
@@ -114,8 +112,9 @@ class AgentEngine:
             cwd=cwd,
         )
 
-        text_parts: list[str] = []
         captured_session_id: str | None = session_id
+        result_text: str | None = None
+        cost_usd: float | None = None
         raw_messages: list[Any] = []
 
         async with ClaudeSDKClient(options=options) as client:
@@ -127,17 +126,17 @@ class AgentEngine:
                 if isinstance(message, SystemMessage) and message.subtype == "init":
                     captured_session_id = message.data.get("session_id")
 
-                elif isinstance(message, AssistantMessage):
-                    for block in message.content:
-                        if isinstance(block, TextBlock):
-                            text_parts.append(block.text)
-
                 elif isinstance(message, ResultMessage):
-                    if message.result:
-                        text_parts.append(message.result)
+                    # ResultMessage is the authoritative final text.
+                    # AssistantMessage TextBlocks contain the same content
+                    # and must NOT be collected separately to avoid duplication.
+                    result_text = message.result
+                    cost_usd = message.total_cost_usd
+                    captured_session_id = message.session_id or captured_session_id
 
         return AgentResponse(
-            text="\n".join(text_parts) if text_parts else "(no response)",
+            text=result_text or "(no response)",
             session_id=captured_session_id,
+            cost_usd=cost_usd,
             raw_messages=raw_messages,
         )

@@ -141,6 +141,7 @@ class OpenClawBot(discord.Client):
                 )
 
         self._handler: MessageHandler | None = None
+        self._ready = False
 
     async def setup_hook(self) -> None:
         """Called once when the bot connects — register commands and start cleanup."""
@@ -162,12 +163,15 @@ class OpenClawBot(discord.Client):
         assert self.user is not None
         logger.info("Logged in as %s (id=%s)", self.user, self.user.id)
 
-        self._handler = MessageHandler(
-            self._config,
-            self._session_manager,
-            bot_user_id=self.user.id,
-            access_controller=self._access_controller,
-        )
+        # Create handler only once — on_ready can fire multiple times on reconnect
+        if self._handler is None:
+            self._handler = MessageHandler(
+                self._config,
+                self._session_manager,
+                bot_user_id=self.user.id,
+                access_controller=self._access_controller,
+            )
+        self._ready = True
 
     async def on_message(self, message: discord.Message) -> None:
         if self._handler is None:

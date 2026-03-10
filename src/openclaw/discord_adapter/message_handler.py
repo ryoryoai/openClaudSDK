@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import collections
 import logging
+import time
 from typing import TYPE_CHECKING
 
 import discord
@@ -33,6 +35,11 @@ class MessageHandler:
         self._bot_user_id = bot_user_id
         self._access_controller = access_controller
         self._processing: set[str] = set()  # prevent concurrent per-user+channel
+        # Dedup: track recently processed message IDs to avoid duplicate responses
+        self._seen_messages: collections.OrderedDict[int, float] = (
+            collections.OrderedDict()
+        )
+        self._seen_max = 200
 
     def should_handle(self, message: discord.Message) -> bool:
         """Decide whether this message should be handled."""
@@ -55,6 +62,15 @@ class MessageHandler:
 
     async def handle(self, message: discord.Message) -> None:
         """Process the message and reply."""
+        # Skip already-processed messages (guard against duplicate gateway events)
+        if message.id in self._seen_messages:
+            logger.debug("Skipping duplicate message %s", message.id)
+            return
+        self._seen_messages[message.id] = time.monotonic()
+        # Evict old entries to bound memory
+        while len(self._seen_messages) > self._seen_max:
+            self._seen_messages.popitem(last=False)
+
         key = f"{message.author.id}:{message.channel.id}"
 
         # Prevent concurrent processing for the same user+channel
